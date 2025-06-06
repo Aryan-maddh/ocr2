@@ -99,3 +99,71 @@ async def match_resume(
         "parsed_resume": parsed_resume,
         "job_matches": job_matches
     })
+
+
+
+
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from auth.service import AuthService
+from auth.models import User
+from middleware.auth import get_current_user
+
+app = FastAPI(title="OCR SaaS Platform", version="1.0.0")
+
+@app.post("/register")
+async def register(email: str, password: str, db: Session = Depends(get_db)):
+    auth_service = AuthService()
+    
+    # Check if user exists
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create new user
+    hashed_password = auth_service.get_password_hash(password)
+    new_user = User(email=email, password_hash=hashed_password)
+    db.add(new_user)
+    db.commit()
+    
+    # Generate token
+    access_token = auth_service.create_access_token(data={"sub": str(new_user.id)})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/login")
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    auth_service = AuthService()
+    
+    user = db.query(User).filter(User.email == form_data.username).first()
+    if not user or not auth_service.verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+    
+    access_token = auth_service.create_access_token(data={"sub": str(user.id)})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/upload/")
+async def upload_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService()
+    
+    # Check subscription limits
+    if not auth_service.check_document_limit(current_user):
+        raise HTTPException(
+            status_code=403, 
+            detail="Daily document limit exceeded. Please upgrade your subscription."
+        )
+    
+    # Process document (your existing logic)
+    # ... existing upload logic ...
+    
+    # Increment user's document count
+    current_user.documents_processed_today += 1
+    db.commit()
+    
+    return {"message": "Document processed successfully"}
