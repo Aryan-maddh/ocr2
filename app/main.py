@@ -4,6 +4,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import Optional
 import os, uuid, json, pandas as pd
+from app.api import subscription
+app.include_router(subscription.router)
+
 
 from app.services.llama_ollama import get_llama_response
 from file_classifier import classify_file
