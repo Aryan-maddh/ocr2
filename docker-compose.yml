@@ -1,0 +1,130 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ocr_saas
+      POSTGRES_USER: ocr_user
+      POSTGRES_PASSWORD: secure_password_123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # Main FastAPI Application
+  api:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql://ocr_user:secure_password_123@db:5432/ocr_saas
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=your-super-secret-key-change-in-production
+      - OLLAMA_HOST=ollama:11434
+    volumes:
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+      - ./temp:/app/temp
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - ollama
+    restart: unless-stopped
+
+  # Celery Worker for Background Tasks
+  celery_worker:
+    build: .
+    command: celery -A services.document_processor worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://ocr_user:secure_password_123@db:5432/ocr_saas
+      - REDIS_URL=redis://redis:6379
+      - OLLAMA_HOST=ollama:11434
+    volumes:
+      - ./uploads:/app/uploads
+      - ./exports:/app/exports
+      - ./temp:/app/temp
+    depends_on:
+      - db
+      - redis
+      - ollama
+    restart: unless-stopped
+
+  # Celery Beat for Scheduled Tasks
+  celery_beat:
+    build: .
+    command: celery -A services.document_processor beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://ocr_user:secure_password_123@db:5432/ocr_saas
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  # Ollama for LLM Processing
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+  # Grafana for Monitoring Dashboard
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ollama_data:
+  grafana_data:
+
+
