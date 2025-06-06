@@ -1,3 +1,4 @@
+import requests
 import json
 import subprocess
 from typing import Dict, List, Optional
@@ -135,3 +136,16 @@ async def get_field_suggestions(
     
     suggestions = json.loads(document.suggested_fields or "[]")
     return {"suggestions": suggestions}
+
+
+def query_llama(prompt: str) -> str:
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "llama3:3b", "prompt": prompt, "stream": False}
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result.get("response", "").strip()
+    except Exception as e:
+        return f"LLM error: {str(e)}"
